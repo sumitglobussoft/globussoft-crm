@@ -113,6 +113,7 @@ const ALLOWED_TRANSITIONS = {
 
 const EMPTY_FORM = {
   contactId: "",
+  tripId: "",
   totalAmount: "",
   currency: "INR",
   status: "Draft",
@@ -229,9 +230,12 @@ export default function InvoicesAdmin() {
   // Slim summary shape (id/name/email) + 500-row cap covers the tenant book;
   // the form is ADMIN/MANAGER-only (canWrite), who see the full tenant.
   const [customers, setCustomers] = useState([]);
+  // TMC trips available for associating an invoice with its travel.
+  const [trips, setTrips] = useState([]);
   // #829 — distinguish 403 from genuine empty so the empty-state copy
   // honestly says "Access restricted" instead of "No invoices match."
   const [permissionDenied, setPermissionDenied] = useState(false);
+  const tripsById = Object.fromEntries(trips.map((trip) => [trip.id, trip]));
 
   const [subBrand, setSubBrand] = useState(searchParams.get("subBrand") || activeSubBrand || "");
   const [status, setStatus] = useState(searchParams.get("status") || "");
@@ -442,6 +446,14 @@ export default function InvoicesAdmin() {
       .catch(() => setCustomers([]));
   }, []);
 
+  // Load the lightweight trip list once for the invoice form and table labels.
+  // The backend scopes this to the current tenant and excludes quote-only trips.
+  useEffect(() => {
+    fetchApi("/api/travel/trips?fields=summary&limit=200", { silent: true })
+      .then((data) => setTrips(Array.isArray(data) ? data : data?.trips || []))
+      .catch(() => setTrips([]));
+  }, []);
+
   // #1051 — fetch contact display names for the IDs we haven't seen yet so the
   // CONTACT column can render names instead of raw IDs. /api/contacts has no
   // batch-by-ids surface, so we parallel-fetch /api/contacts/:id and cache.
@@ -503,6 +515,7 @@ export default function InvoicesAdmin() {
   const openEdit = (inv) => {
     setForm({
       contactId: inv.contactId == null ? "" : String(inv.contactId),
+      tripId: inv.tripId == null ? "" : String(inv.tripId),
       totalAmount: inv.totalAmount == null ? "" : String(inv.totalAmount),
       currency: inv.currency || "INR",
       status: inv.status || "Draft",
@@ -613,6 +626,13 @@ export default function InvoicesAdmin() {
         subBrand: form.subBrand || "tmc",
         dueDate: form.dueDate,
       };
+      if (form.tripId && form.tripId.trim()) {
+        const tid = parseInt(form.tripId.trim(), 10);
+        if (Number.isFinite(tid)) payload.tripId = tid;
+      } else if (editingId) {
+        // Explicitly clear a previously linked trip when editing.
+        payload.tripId = null;
+      }
       if (form.quoteId && form.quoteId.trim()) {
         const qid = parseInt(form.quoteId.trim(), 10);
         if (Number.isFinite(qid)) payload.quoteId = qid;
@@ -1228,6 +1248,22 @@ export default function InvoicesAdmin() {
               </option>
             ))}
           </select>
+          <select
+            value={form.tripId}
+            onChange={(e) => setForm({ ...form, tripId: e.target.value })}
+            style={inputStyle}
+            aria-label="Trip"
+          >
+            <option value="">No trip linked</option>
+            {form.tripId && !tripsById[Number(form.tripId)] && (
+              <option value={form.tripId}>Trip #{form.tripId}</option>
+            )}
+            {trips.map((trip) => (
+              <option key={trip.id} value={String(trip.id)}>
+                {trip.tripCode || `Trip #${trip.id}`} · {trip.destination || "Destination not set"}
+              </option>
+            ))}
+          </select>
           <input
             placeholder="Total amount *"
             required
@@ -1323,10 +1359,11 @@ export default function InvoicesAdmin() {
         {loading && invoices.length === 0 ? (
           <div style={empty}>Loading&hellip;</div>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+          <table style={{ width: "100%", minWidth: 1500, borderCollapse: "collapse", tableLayout: "fixed" }}>
             <colgroup>
               <col style={{ width: "12%" }} />
               <col style={{ width: "21%" }} />
+              <col style={{ width: "16%" }} />
               <col style={{ width: "10%" }} />
               <col style={{ width: "12%" }} />
               <col style={{ width: "8%" }} />
@@ -1339,6 +1376,7 @@ export default function InvoicesAdmin() {
               <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
                 <th style={th}>{sortHeader("Invoice #", "invoiceNum")}</th>
                 <th style={th}>{sortHeader("Contact", "contact")}</th>
+                <th style={th}>Trip</th>
                 <th style={th}>{sortHeader("Status", "status")}</th>
                 <th style={th}>{sortHeader("Total", "totalAmount")}</th>
                 <th style={th}>{sortHeader("Currency", "currency")}</th>
@@ -1363,10 +1401,10 @@ export default function InvoicesAdmin() {
                       opacity: isVoided ? 0.7 : 1,
                     }}
                   >
-                    <td style={{ ...td, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 13 }}>
+                    <td style={{ ...td, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 13, whiteSpace: "nowrap" }}>
                       {inv.invoiceNum || "—"}
                     </td>
-                    <td style={td}>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>
                       {(() => {
                         const c = contactsById[inv.contactId];
                         const name = c?.name;
@@ -1381,6 +1419,17 @@ export default function InvoicesAdmin() {
                           </Link>
                         );
                       })()}
+                    </td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>
+                      {inv.tripId ? (
+                        <Link
+                          to={`/travel/trips/${inv.tripId}`}
+                          title={tripsById[inv.tripId]?.destination || `Trip #${inv.tripId}`}
+                          style={{ color: "var(--text-primary)", textDecoration: "none", fontWeight: 500 }}
+                        >
+                          {tripsById[inv.tripId]?.tripCode || `Trip #${inv.tripId}`}
+                        </Link>
+                      ) : "—"}
                     </td>
                     <td style={td}>
                       <span
@@ -1540,8 +1589,8 @@ export default function InvoicesAdmin() {
               })}
               {visibleInvoices.length === 0 && (
                 <tr>
-                  <td
-                    colSpan={canWrite ? 9 : 8}
+                    <td
+                    colSpan={canWrite ? 10 : 9}
                     style={{
                       ...td,
                       textAlign: "center",
@@ -1997,7 +2046,8 @@ const td = {
 };
 const tableFrame = {
   padding: 0,
-  overflowX: "hidden",
+  overflowX: "auto",
+  WebkitOverflowScrolling: "touch",
   overflowY: "visible",
   height: "auto",
   minHeight: 0,

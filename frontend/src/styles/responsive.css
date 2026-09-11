@@ -289,3 +289,138 @@
     width: 220px !important;
   }
 }
+
+/* --------------------------------------------------------------------------
+ * Travel CRM responsive baseline
+ *
+ * Travel has a large route surface and many of its older pages still use
+ * inline desktop-first dimensions. Keep this layer at the shared layout
+ * boundary so every authenticated travel route gets the same protections:
+ * shrinking page roots, wrapping action bars, readable forms, and contained
+ * table/grid overflow. The rules are scoped to travel and therefore do not
+ * alter wellness or generic tenants.
+ * -------------------------------------------------------------------------- */
+
+[data-vertical="travel"] .travel-content-frame,
+[data-vertical="travel"] .travel-content-frame > * {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+[data-vertical="travel"] .travel-content-frame img,
+[data-vertical="travel"] .travel-content-frame svg,
+[data-vertical="travel"] .travel-content-frame canvas,
+[data-vertical="travel"] .travel-content-frame iframe {
+  max-width: 100%;
+}
+
+[data-vertical="travel"] .travel-content-frame input,
+[data-vertical="travel"] .travel-content-frame select,
+[data-vertical="travel"] .travel-content-frame textarea {
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Tables retain their readable row shape. When a table is wider than its
+   parent, the owning surface becomes the scroll area instead of wrapping
+   values into hard-to-scan fragments. */
+[data-vertical="travel"] .travel-content-frame .glass:has(table),
+[data-vertical="travel"] .travel-content-frame .card:has(table),
+[data-vertical="travel"] .travel-content-frame .table-container,
+[data-vertical="travel"] .travel-content-frame .table-wrapper {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+[data-vertical="travel"] .travel-content-frame table th,
+[data-vertical="travel"] .travel-content-frame table td {
+  white-space: nowrap;
+}
+
+@media (max-width: 899px) {
+  [data-vertical="travel"] .travel-content-frame > * {
+    padding-left: clamp(0.75rem, 3vw, 1.5rem) !important;
+    padding-right: clamp(0.75rem, 3vw, 1.5rem) !important;
+  }
+
+  /* Inline flex toolbars are common across the travel pages. Allow filters,
+     exports and primary actions to form a second row instead of pushing the
+     page wider than the viewport. */
+  [data-vertical="travel"] .travel-content-frame main div[style*="display: flex"],
+  [data-vertical="travel"] .travel-content-frame section div[style*="display: flex"],
+  [data-vertical="travel"] .travel-content-frame header[style*="display: flex"] {
+    flex-wrap: wrap !important;
+  }
+
+  /* Keep two-column inline grids usable on tablets and phones. The explicit
+     minmax rules handle the older route components that cannot use a shared
+     grid utility without a larger JSX refactor. */
+  [data-vertical="travel"] .travel-content-frame div[style*="minmax(320px"],
+  [data-vertical="travel"] .travel-content-frame div[style*="minmax(340px"],
+  [data-vertical="travel"] .travel-content-frame div[style*="minmax(380px"],
+  [data-vertical="travel"] .travel-content-frame div[style*="minmax(420px"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Most travel tables are intentionally wide. Scroll the card that owns the
+     table, rather than allowing the application shell itself to overflow. */
+  [data-vertical="travel"] .travel-content-frame table {
+    max-width: none;
+    min-width: 620px;
+  }
+
+  /* Preserve compact CRM values (statuses, dates, amounts and labels) on a
+     single line. The table's horizontal scroller handles the extra width;
+     arbitrary word breaks make records harder to scan and caused values such
+     as "Accepted" / "TRAVELS TALL" to split across lines. */
+  /* Dialogs and drawers must remain usable when opened from a narrow page. */
+  [data-vertical="travel"] [role="dialog"],
+  [data-vertical="travel"] .modal,
+  [data-vertical="travel"] [class*="modal-content"] {
+    width: calc(100vw - 1rem) !important;
+    max-width: 600px !important;
+    max-height: calc(100vh - 1rem) !important;
+    overflow-y: auto !important;
+  }
+}
+
+@media (max-width: 600px) {
+  [data-vertical="travel"] .travel-content-frame > * {
+    padding-top: 1rem !important;
+    padding-bottom: 1rem !important;
+  }
+
+  [data-vertical="travel"] .travel-content-frame h1 {
+    font-size: clamp(1.35rem, 7vw, 1.8rem) !important;
+    line-height: 1.2;
+  }
+
+  [data-vertical="travel"] .travel-content-frame h2 {
+    font-size: clamp(1.15rem, 5.5vw, 1.45rem) !important;
+  }
+
+  [data-vertical="travel"] .travel-content-frame .card,
+  [data-vertical="travel"] .travel-content-frame .glass {
+    padding: 1rem !important;
+  }
+
+  [data-vertical="travel"] .travel-content-frame button,
+  [data-vertical="travel"] .travel-content-frame .btn-primary,
+  [data-vertical="travel"] .travel-content-frame .btn-secondary,
+  [data-vertical="travel"] .travel-content-frame .btn-danger {
+    max-width: 100%;
+  }
+
+  /* Form rows with a fixed label column become a single readable column. */
+  [data-vertical="travel"] .travel-content-frame div[style*="140px 1fr"],
+  [data-vertical="travel"] .travel-content-frame div[style*="160px 1fr"],
+  [data-vertical="travel"] .travel-content-frame div[style*="180px 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  [data-vertical="travel"] .travel-content-frame table {
+    min-width: 560px;
+  }
+}

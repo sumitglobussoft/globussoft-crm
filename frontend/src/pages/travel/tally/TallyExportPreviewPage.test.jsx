@@ -60,7 +60,7 @@ describe("TallyExportPreviewPage connector and fallback exports", () => {
     URL.revokeObjectURL = vi.fn();
   });
 
-  it("keeps manual XML downloads available while the connector is offline", async () => {
+  it("does not show manual XML import controls while the connector is offline", async () => {
     fetchApi.mockImplementation(async (url) => {
       if (url.endsWith("/connector/status")) return { configured: true, online: false };
       return apiResponse(url);
@@ -68,16 +68,10 @@ describe("TallyExportPreviewPage connector and fallback exports", () => {
 
     render(<TallyExportPreviewPage />);
 
-    const masters = await screen.findByRole("button", { name: /Download Masters XML/i });
-    const vouchers = screen.getByRole("button", { name: /Download Voucher XML/i });
-    expect(masters).toBeEnabled();
-    expect(vouchers).toBeDisabled();
+    await screen.findByRole("button", { name: /Push directly to Tally/i });
+    expect(screen.queryByRole("button", { name: /Download Masters XML/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Download Voucher XML/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Push directly to Tally/i })).toBeDisabled();
-
-    fireEvent.click(masters);
-    expect(vouchers).toBeEnabled();
-    fireEvent.click(vouchers);
-    expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
   });
 
   it("refreshes connector status without navigating away", async () => {

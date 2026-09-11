@@ -408,7 +408,7 @@ async function nextSubBrandInvoiceNum(tenantId, subBrand, date = new Date()) {
 }
 
 // GET /api/travel/invoices
-// Honors ?subBrand=tmc + ?status=Issued + ?contactId=N + ?quoteId=N.
+// Honors ?subBrand=tmc + ?status=Issued + ?contactId=N + ?quoteId=N + ?tripId=N.
 // GET /api/travel/invoices
 //
 // Slim-shape opt-in (#920 slice S3 — FR-3.5 PII payload reduction).
@@ -453,6 +453,16 @@ router.get(
           });
         }
         where.quoteId = qid;
+      }
+      if (req.query.tripId) {
+        const tid = parseInt(req.query.tripId, 10);
+        if (!Number.isFinite(tid)) {
+          return res.status(400).json({
+            error: "tripId must be a number",
+            code: "INVALID_TRIP_ID",
+          });
+        }
+        where.tripId = tid;
       }
       if (req.query.docType) {
         assertValidDocType(String(req.query.docType));
@@ -4566,6 +4576,7 @@ router.post(
         dueDate,
         subBrand,
         quoteId,
+        tripId,
         status,
         docType,
       } = req.body || {};
@@ -4597,6 +4608,27 @@ router.post(
           return res.status(400).json({
             error: "quoteId must be a number",
             code: "INVALID_QUOTE_ID",
+          });
+        }
+      }
+
+      let tripIdInt = null;
+      if (tripId != null && tripId !== "") {
+        tripIdInt = parseInt(tripId, 10);
+        if (!Number.isFinite(tripIdInt)) {
+          return res.status(400).json({
+            error: "tripId must be a number",
+            code: "INVALID_TRIP_ID",
+          });
+        }
+        const tripExists = await prisma.tmcTrip.findFirst({
+          where: { id: tripIdInt, tenantId: req.travelTenant.id },
+          select: { id: true },
+        });
+        if (!tripExists) {
+          return res.status(422).json({
+            error: `Trip #${tripIdInt} not found in this tenant`,
+            code: "TRIP_NOT_FOUND",
           });
         }
       }
@@ -4697,6 +4729,7 @@ router.post(
         subBrand: targetSubBrand,
         contactId: contactIdInt,
         quoteId: quoteIdInt,
+        tripId: tripIdInt,
         invoiceNum,
         status: status || "Draft",
         totalAmount: totalAmount,
@@ -4720,7 +4753,7 @@ router.post(
           sourceId: created.id,
           reference: created.invoiceNum,
           transactionType: "SALES",
-          tripId: created.itineraryId || null,
+          tripId: created.tripId || created.itineraryId || null,
           partyName: `Customer #${created.contactId}`,
           amount: created.totalAmount,
           voucherType: created.docType === "CreditNote" ? "CREDIT NOTE" : created.docType === "DebitNote" ? "DEBIT NOTE" : "SALES",
@@ -4748,6 +4781,7 @@ router.post(
           subBrand: created.subBrand,
           contactId: created.contactId,
           quoteId: created.quoteId,
+          tripId: created.tripId,
           invoiceNum: created.invoiceNum,
           status: created.status,
           currency: created.currency,
@@ -4806,6 +4840,7 @@ router.put(
         dueDate,
         subBrand,
         quoteId,
+        tripId,
         status,
         paidAt,
         docType,
@@ -4833,6 +4868,30 @@ router.put(
             });
           }
           data.quoteId = qi;
+        }
+      }
+      if (tripId !== undefined) {
+        if (tripId === null || tripId === "") {
+          data.tripId = null;
+        } else {
+          const ti = parseInt(tripId, 10);
+          if (!Number.isFinite(ti)) {
+            return res.status(400).json({
+              error: "tripId must be a number",
+              code: "INVALID_TRIP_ID",
+            });
+          }
+          const tripExists = await prisma.tmcTrip.findFirst({
+            where: { id: ti, tenantId: req.travelTenant.id },
+            select: { id: true },
+          });
+          if (!tripExists) {
+            return res.status(422).json({
+              error: `Trip #${ti} not found in this tenant`,
+              code: "TRIP_NOT_FOUND",
+            });
+          }
+          data.tripId = ti;
         }
       }
       if (totalAmount !== undefined) data.totalAmount = totalAmount;
@@ -4909,7 +4968,7 @@ router.put(
           sourceId: updated.id,
           reference: updated.invoiceNum,
           transactionType: "SALES",
-          tripId: updated.itineraryId,
+          tripId: updated.tripId || updated.itineraryId || null,
           partyName: `Customer #${updated.contactId}`,
           amount: updated.totalAmount,
           voucherType: updated.docType === "CreditNote" ? "CREDIT NOTE" : updated.docType === "DebitNote" ? "DEBIT NOTE" : "SALES",

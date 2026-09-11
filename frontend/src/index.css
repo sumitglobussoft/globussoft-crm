@@ -2106,6 +2106,32 @@ body[data-vertical="travel"] .travel-sidebar-collapsed .travel-settings-link.act
   animation: pageFadeIn 0.4s ease-out forwards;
 }
 
+/* Travel CRM content frame.
+ * Page components historically owned their own outer container, which left
+ * travel pages using different widths. This class is added only for travel
+ * tenants; generic and wellness CRM layouts are not affected.
+ * !important is intentional because legacy page roots set these values
+ * inline.
+ */
+.travel-content-frame {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.travel-content-frame > * {
+  width: 100% !important;
+  max-width: var(--crm-content-max-width, 1440px) !important;
+  margin-inline: auto !important;
+  box-sizing: border-box;
+}
+
+@media (max-width: 899px) {
+  .travel-content-frame > * {
+    max-width: none !important;
+  }
+}
+
 /* Sidebar nav scrollbar — more visible */
 aside nav::-webkit-scrollbar {
   width: 5px;

@@ -4023,21 +4023,22 @@ const stepHeader = { display: 'flex', alignItems: 'center', gap: 12, padding: '1
 const stepIcon = { width: 36, height: 36, borderRadius: 8, background: 'var(--subtle-bg-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary-color, var(--accent-color))' };
 
 const progressBar = { display: 'flex', gap: 4, marginBottom: 16, flexWrap: 'wrap' };
-// Sticks to the bottom of the viewport as you scroll a long step, instead of
-// only being reachable by scrolling all the way down every time.
+// Keep navigation in normal document flow. A sticky bottom bar can overlap
+// the final form fields when the travel layout's main scroller is shorter
+// than the form, which makes labels and inputs appear behind the controls.
 const floatingNavBar = {
-  position: 'sticky',
-  bottom: 16,
-  zIndex: 20,
+  position: 'relative',
   display: 'flex',
   justifyContent: 'space-between',
   gap: 10,
   marginTop: 16,
+  marginBottom: 16,
   padding: 12,
   background: 'var(--surface-color)',
   border: '1px solid var(--border-color)',
   borderRadius: 10,
   boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+  boxSizing: 'border-box',
 };
 const progressStep = { display: 'inline-flex', alignItems: 'center', padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', cursor: 'pointer', transition: 'all 0.15s ease' };
 

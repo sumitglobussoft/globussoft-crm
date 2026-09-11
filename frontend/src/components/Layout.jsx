@@ -593,7 +593,13 @@ const Layout = () => {
           }}
         >
           <TravelKeyboardShortcuts enabled={isTravelShortcutPath} />
-          <Outlet />
+          {isTravel ? (
+            <div className="travel-content-frame">
+              <Outlet />
+            </div>
+          ) : (
+            <Outlet />
+          )}
         </main>
         {/* Hard subscription paywall — renders a non-dismissable overlay
             over the entire app when the trial has ended or the paid

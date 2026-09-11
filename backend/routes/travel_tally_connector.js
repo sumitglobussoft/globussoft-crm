@@ -125,6 +125,7 @@ router.post("/credentials", ...guards, requirePermission("tally", "update"), asy
 router.post("/push", ...guards, requirePermission("tally", "export"), async (req, res) => {
   const mastersXml = String(req.body?.mastersXml || "").trim();
   const vouchersXml = String(req.body?.vouchersXml || "").trim();
+  const allowDuplicate = req.body?.allowDuplicate === true;
   if (!validXml(vouchersXml) || (mastersXml && !validXml(mastersXml))) {
     return res.status(400).json({ error: "Valid Tally ENVELOPE XML is required", code: "INVALID_TALLY_XML" });
   }
@@ -150,7 +151,7 @@ router.post("/push", ...guards, requirePermission("tally", "export"), async (req
       take: 25,
     });
     const duplicate = recentVoucherPushes.find((entry) => entry.requestPayload === vouchersXml);
-    if (duplicate) {
+    if (duplicate && !allowDuplicate) {
       return res.status(409).json({ error: "This exact voucher export was already pushed successfully. Change the export selection before pushing again.", code: "TALLY_DUPLICATE_PUSH", pushedAt: duplicate.createdAt });
     }
 

@@ -139,6 +139,20 @@ exports.updateCalendarEvent = async (req, res) => {
       return res.status(403).json({ error: "Unauthorized to edit this event" });
     }
 
+    // Once a meeting has started, keep its record immutable. This mirrors the
+    // UI lock and prevents edits through direct API calls as well.
+    const eventStart = new Date(event.startTime);
+    const eventEnd = new Date(event.endTime);
+    const now = new Date();
+    if (
+      !isNaN(eventStart.getTime()) &&
+      !isNaN(eventEnd.getTime()) &&
+      eventStart <= now &&
+      eventEnd > now
+    ) {
+      return res.status(409).json({ error: "In-progress meetings cannot be edited" });
+    }
+
     const provider = event.provider;
 
     // Update in external calendar first

@@ -751,10 +751,59 @@ router.get("/slots", verifyToken, async (req, res) => {
       end: new Date(b.end).getTime(),
     }));
 
+    // Google free/busy marks an all-day birthday as busy for the whole day.
+    // Birthdays are informational in this CRM, so remove their intervals from
+    // the busy set before calculating meeting slots. Real meetings remain
+    // blocking.
+    let birthdayBusy = [];
+    try {
+      const birthdayEvents = await calendar.events.list({
+        calendarId: calId,
+        timeMin: new Date(win.windowStartMs).toISOString(),
+        timeMax: new Date(win.windowEndMs).toISOString(),
+        singleEvents: true,
+        showDeleted: false,
+        maxResults: 2500,
+        fields: "items(summary,description,start,end)",
+      });
+      birthdayBusy = (birthdayEvents?.data?.items || [])
+        .filter((event) =>
+          includesBirthdayText(`${event?.summary || ""} ${event?.description || ""}`),
+        )
+        .map((event) => ({
+          start: new Date(event.start?.dateTime || event.start?.date).getTime(),
+          end: new Date(event.end?.dateTime || event.end?.date).getTime(),
+        }))
+        .filter((event) => Number.isFinite(event.start) && Number.isFinite(event.end));
+    } catch (birthdayLookupError) {
+      // Free/busy is still useful if the supplemental event lookup fails.
+      console.warn("[calendar_google] birthday transparency lookup failed:", birthdayLookupError.message);
+    }
+
+    const effectiveBusy = busy.flatMap((interval) => {
+      let remaining = [interval];
+      birthdayBusy.forEach((birthday) => {
+        remaining = remaining.flatMap((segment) => {
+          if (birthday.end <= segment.start || birthday.start >= segment.end) {
+            return [segment];
+          }
+          const pieces = [];
+          if (segment.start < birthday.start) {
+            pieces.push({ start: segment.start, end: birthday.start });
+          }
+          if (birthday.end < segment.end) {
+            pieces.push({ start: birthday.end, end: segment.end });
+          }
+          return pieces;
+        });
+      });
+      return remaining;
+    });
+
     const slots = freeSlots(
       win.windowStartMs,
       win.windowEndMs,
-      busy,
+      effectiveBusy,
       win.durationMins,
       win.stepMins,
       Date.now(),
@@ -763,6 +812,8 @@ router.get("/slots", verifyToken, async (req, res) => {
     return res.json({
       date: win.dateStr,
       durationMins: win.durationMins,
+      busyCount: effectiveBusy.length,
+      workingHours: { start: 9, end: 18 },
       timeMin: new Date(win.windowStartMs).toISOString(),
       timeMax: new Date(win.windowEndMs).toISOString(),
       slots,

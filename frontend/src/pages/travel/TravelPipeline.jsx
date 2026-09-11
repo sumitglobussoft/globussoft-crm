@@ -524,7 +524,11 @@ export default function TravelPipeline() {
           </div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "var(--text-primary)" }}>
             Travel Pipeline
-            <CountBadge count={visible.length} title={`${visible.length.toLocaleString()} deals in view`} />
+            <CountBadge
+              count={visible.length}
+              title={`${visible.length.toLocaleString()} deals in view`}
+              style={{ marginLeft: 8 }}
+            />
           </h1>
         </div>
         <div style={{ display: "flex", gap: 10 }}>

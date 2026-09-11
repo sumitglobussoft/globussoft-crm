@@ -181,6 +181,17 @@ function safeDate(value) {
   return date && Number.isFinite(date.getTime()) ? date : null;
 }
 
+function getMeetingStatus(event, now = new Date()) {
+  const start = safeDate(event?.startTime);
+  const end = safeDate(event?.endTime) || start;
+  if (!start || !end) return "upcoming";
+  if (start.getTime() <= now.getTime() && end.getTime() > now.getTime()) {
+    return "in-progress";
+  }
+  if (end.getTime() <= now.getTime()) return "completed";
+  return "upcoming";
+}
+
 function parseLocalDateTime(value) {
   if (value instanceof Date) return safeDate(value);
   if (typeof value === "string") {
@@ -462,10 +473,6 @@ function getBirthdayAlertKey(contact) {
   return `birthday-${contact?.source || "contact"}-${contact?.id}`;
 }
 
-function getMeetingAlertKey(event) {
-  return `meeting-${event?._provider || "unknown"}-${event?.id}`;
-}
-
 const MEETING_REMINDER_WINDOWS = [
   { key: "24h", label: "24 hours", ms: 24 * 60 * 60 * 1000 },
   { key: "30m", label: "30 minutes", ms: 30 * 60 * 1000 },
@@ -493,6 +500,14 @@ const CALENDAR_SYNC_MAX_RENDERED_MEETINGS = 50;
 
 function getMeetingReminderAlertKey(event, reminderKey) {
   return `meeting-${event?._provider || "unknown"}-${event?.id}-${reminderKey}`;
+}
+
+function getActiveMeetingReminderWindow(timeUntilStart) {
+  for (let index = MEETING_REMINDER_WINDOWS.length - 1; index >= 0; index -= 1) {
+    const reminderWindow = MEETING_REMINDER_WINDOWS[index];
+    if (timeUntilStart <= reminderWindow.ms) return reminderWindow;
+  }
+  return null;
 }
 
 function isBirthdayLikeEvent(event) {
@@ -576,6 +591,7 @@ export default function CalendarSync() {
   const [openPanel, setOpenPanel] = useState("details");
   const [seenAlertKeys, setSeenAlertKeys] = useState(() => readSeenAlertState());
   const [dismissedAlertKeys, setDismissedAlertKeys] = useState(() => readDismissedAlertState());
+  const [alertClock, setAlertClock] = useState(() => Date.now());
   // T18 slot-picker (Google only): pick a day → fetch free/busy slots →
   // click a slot to fill start/end. Purely additive; leaving it untouched
   // keeps the manual datetime inputs as the source of truth.
@@ -765,6 +781,11 @@ export default function CalendarSync() {
       // Best-effort only.
     }
   }, [dismissedAlertKeys]);
+
+  useEffect(() => {
+    const timerId = window.setInterval(() => setAlertClock(Date.now()), 30 * 1000);
+    return () => window.clearInterval(timerId);
+  }, []);
 
   useEffect(() => {
     if (!showTripDetail) return undefined;
@@ -989,7 +1010,7 @@ export default function CalendarSync() {
   }, [meetingDateFilter, meetingRows, meetingStatusFilter]);
 
   const pendingAlerts = useMemo(() => {
-    const now = new Date();
+    const now = new Date(alertClock);
     const horizon = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     const alerts = [];
 
@@ -1026,34 +1047,32 @@ export default function CalendarSync() {
       if (!start) return;
       const timeUntilStart = start.getTime() - now.getTime();
       if (timeUntilStart <= 0) return;
-      if (timeUntilStart > MEETING_REMINDER_WINDOWS[0].ms) return;
+      const reminderWindow = getActiveMeetingReminderWindow(timeUntilStart);
+      if (!reminderWindow) return;
 
-      MEETING_REMINDER_WINDOWS.forEach((window) => {
-        if (timeUntilStart > window.ms) return;
-        alerts.push({
-          key: getMeetingReminderAlertKey(event, window.key),
-          kind: "Meeting",
-          title: `${event.title || "Meeting"} (${window.label})`,
-          when: start,
-          note: `Reminder: ${window.label} before start`,
-          event,
-          reminderKey: window.key,
-          reminderLabel: window.label,
-        });
+      alerts.push({
+        key: getMeetingReminderAlertKey(event, reminderWindow.key),
+        kind: "Meeting",
+        title: `${event.title || "Meeting"} (${reminderWindow.label})`,
+        when: start,
+        note: `Reminder: ${reminderWindow.label} before start`,
+        event,
+        reminderKey: reminderWindow.key,
+        reminderLabel: reminderWindow.label,
       });
     });
 
     return alerts.sort((a, b) => a.when - b.when);
-  }, [birthdayRows, meetingRows, travelTripRows]);
-
-  const unreadAlerts = useMemo(
-    () => pendingAlerts.filter((alert) => !seenAlertKeys[alert.key]),
-    [pendingAlerts, seenAlertKeys],
-  );
+  }, [alertClock, birthdayRows, meetingRows, travelTripRows]);
 
   const visiblePendingAlerts = useMemo(
     () => pendingAlerts.filter((alert) => !dismissedAlertKeys[alert.key]),
     [pendingAlerts, dismissedAlertKeys],
+  );
+
+  const unreadAlerts = useMemo(
+    () => visiblePendingAlerts.filter((alert) => !seenAlertKeys[alert.key]),
+    [seenAlertKeys, visiblePendingAlerts],
   );
 
   const sortedPendingAlerts = useMemo(() => {
@@ -1150,7 +1169,7 @@ export default function CalendarSync() {
   // opens, to populate the attendee dropdown. Best-effort — failure just
   // leaves the manual email input as the only path.
   useEffect(() => {
-    if (!showCreateModal || contactOptions.length) return;
+    if ((!showCreateModal && !(showEventDetail && isEditingEvent)) || contactOptions.length) return;
     fetchApi("/api/contacts?limit=200")
       .then((res) => {
         const list = Array.isArray(res)
@@ -1167,17 +1186,45 @@ export default function CalendarSync() {
         );
       })
       .catch(() => {});
-  }, [showCreateModal, contactOptions.length]);
+  }, [showCreateModal, showEventDetail, isEditingEvent, contactOptions.length]);
 
   // Append an email to the comma-separated attendees field, de-duplicating.
   const addAttendeeEmail = (email) => {
-    if (!email) return;
+    const normalizedEmail = String(email || "").trim();
+    if (!normalizedEmail) return;
     const current = formData.attendees
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    if (current.includes(email)) return;
-    setFormData({ ...formData, attendees: [...current, email].join(", ") });
+    if (current.some((item) => item.toLowerCase() === normalizedEmail.toLowerCase())) return;
+    setFormData({ ...formData, attendees: [...current, normalizedEmail].join(", ") });
+  };
+
+  const removeAttendeeEmail = (email) => {
+    const remaining = formData.attendees
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item && item.toLowerCase() !== String(email).toLowerCase());
+    setFormData({ ...formData, attendees: remaining.join(", ") });
+  };
+
+  const addEditAttendeeEmail = (email) => {
+    const normalizedEmail = String(email || "").trim();
+    if (!normalizedEmail) return;
+    const current = String(editFormData.attendees || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (current.some((item) => item.toLowerCase() === normalizedEmail.toLowerCase())) return;
+    setEditFormData({ ...editFormData, attendees: [...current, normalizedEmail].join(", ") });
+  };
+
+  const removeEditAttendeeEmail = (email) => {
+    const remaining = String(editFormData.attendees || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item && item.toLowerCase() !== String(email).toLowerCase());
+    setEditFormData({ ...editFormData, attendees: remaining.join(", ") });
   };
 
   const handleCreateEvent = async (e) => {
@@ -1269,11 +1316,16 @@ export default function CalendarSync() {
       }).toString();
       const res = await fetchApi(`/api/calendar/${createProvider}/slots?${qs}`);
       const slots = Array.isArray(res?.slots) ? res.slots : [];
+      const busyCount = Number(res?.busyCount || 0);
       setSlotPicker((s) => ({
         ...s,
         loading: false,
         slots,
-        error: slots.length ? "" : "No free slots that day",
+        error: slots.length
+          ? ""
+          : busyCount > 0
+            ? "No free slots between 9:00 AM and 6:00 PM. Your Google Calendar is busy during that window."
+            : "No free slots between 9:00 AM and 6:00 PM.",
       }));
     } catch (err) {
       setSlotPicker((s) => ({
@@ -1325,6 +1377,11 @@ export default function CalendarSync() {
 
   const handleEditEvent = async (e) => {
     e.preventDefault();
+    if (getMeetingStatus(selectedEvent) === "in-progress") {
+      setToast("In-progress meetings cannot be edited");
+      setIsEditingEvent(false);
+      return;
+    }
     if (
       !editFormData.title ||
       !editFormData.startTime ||
@@ -1664,9 +1721,25 @@ export default function CalendarSync() {
       return;
     }
     if (key === "alerts") {
-      markAlertKeysSeen(pendingAlerts.map((alert) => alert.key));
       setOpenPanel("alerts");
       scrollToRef(alertsSectionRef);
+    }
+  };
+
+  const handleAlertClick = (alert) => {
+    markAlertKeysSeen([alert?.key]);
+    if (alert?.trip) {
+      openTripDetail(alert.trip);
+      return;
+    }
+    if (alert?.event) {
+      handleOpenEventDetail(alert.event);
+      return;
+    }
+    if (alert?.contact) {
+      setOpenPanel("details");
+      setActiveTab("birthdays");
+      scrollToRef(detailsSectionRef);
     }
   };
 
@@ -1676,8 +1749,16 @@ export default function CalendarSync() {
         const provider =
           PROVIDERS.find((p) => p.key === ev._provider) || PROVIDERS[0];
         const count = attendeeCount(ev.attendees);
-        const alertKey = getMeetingAlertKey(ev);
-        const isNew = Boolean(unreadAlerts.find((alert) => alert.key === alertKey));
+        const meetingAlert = pendingAlerts.find(
+          (alert) =>
+            alert.kind === "Meeting" &&
+            String(alert.event?.id) === String(ev.id) &&
+            alert.event?._provider === ev._provider,
+        );
+        const alertKey = meetingAlert?.key;
+        const isNew = Boolean(alertKey && unreadAlerts.some((alert) => alert.key === alertKey));
+        const meetingStatus = getMeetingStatus(ev);
+        const isInProgress = meetingStatus === "in-progress";
         return (
           <div
             key={`${ev._provider}-${ev.id}`}
@@ -1742,6 +1823,20 @@ export default function CalendarSync() {
                     }}
                   >
                     New
+                  </span>
+                )}
+                {isInProgress && (
+                  <span
+                    style={{
+                      padding: "0.18rem 0.45rem",
+                      borderRadius: 999,
+                      background: "rgba(16,185,129,0.14)",
+                      color: "#059669",
+                      fontSize: "0.65rem",
+                      fontWeight: 800,
+                    }}
+                  >
+                    In progress
                   </span>
                 )}
               </div>
@@ -2587,20 +2682,16 @@ export default function CalendarSync() {
             <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>24h trip/birthday reminders plus 24h, 30m, and 10m meeting reminders</div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-            {sortedPendingAlerts.slice(0, 5).map((alert) => (
+            {sortedPendingAlerts.map((alert) => (
               <div
                 key={alert.key}
-                role={alert.trip ? "button" : undefined}
-                tabIndex={alert.trip ? 0 : undefined}
-                onClick={() => {
-                  markAlertKeysSeen([alert.key]);
-                  if (alert.trip) openTripDetail(alert.trip);
-                }}
+                role="button"
+                tabIndex={0}
+                onClick={() => handleAlertClick(alert)}
                 onKeyDown={(e) => {
-                  if (alert.trip && (e.key === "Enter" || e.key === " ")) {
+                  if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    markAlertKeysSeen([alert.key]);
-                    openTripDetail(alert.trip);
+                    handleAlertClick(alert);
                   }
                 }}
                 style={{
@@ -2611,7 +2702,7 @@ export default function CalendarSync() {
                   padding: "0.65rem 0.8rem",
                   borderRadius: 10,
                   background: "rgba(255,255,255,0.04)",
-                  cursor: alert.trip ? "pointer" : "default",
+                  cursor: "pointer",
                 }}
               >
                 <div>
@@ -2639,7 +2730,7 @@ export default function CalendarSync() {
                 <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexShrink: 0 }}>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.2rem", minWidth: 92 }}>
                   <div style={{ fontSize: "0.74rem", fontWeight: 700, color: "#f59e0b" }}>Due soon</div>
-                    {alert.trip && (
+                    {(alert.trip || alert.event || alert.contact) && (
                       <div style={{ fontSize: "0.74rem", fontWeight: 700, color: "var(--accent-color, #6366f1)" }}>
                         View details
                       </div>
@@ -3325,14 +3416,30 @@ export default function CalendarSync() {
                     Close
                   </button>
                   <button
-                    onClick={() => setIsEditingEvent(true)}
+                    onClick={() => {
+                      if (getMeetingStatus(selectedEvent) === "in-progress") {
+                        setToast("In-progress meetings cannot be edited");
+                        return;
+                      }
+                      setIsEditingEvent(true);
+                    }}
+                    disabled={getMeetingStatus(selectedEvent) === "in-progress"}
+                    title={
+                      getMeetingStatus(selectedEvent) === "in-progress"
+                        ? "In-progress meetings cannot be edited"
+                        : "Edit event"
+                    }
                     style={{
                       padding: "0.65rem 1.5rem",
                       borderRadius: "8px",
                       border: "none",
                       background: "var(--accent-color, #6366f1)",
                       color: "#fff",
-                      cursor: "pointer",
+                      cursor:
+                        getMeetingStatus(selectedEvent) === "in-progress"
+                          ? "not-allowed"
+                          : "pointer",
+                      opacity: getMeetingStatus(selectedEvent) === "in-progress" ? 0.5 : 1,
                       fontWeight: 600,
                       fontSize: "0.9rem",
                       transition: "all 0.2s ease",
@@ -3648,6 +3755,93 @@ export default function CalendarSync() {
                     >
                       Attendees
                     </label>
+                    {contactOptions.length > 0 && (
+                      <select
+                        value=""
+                        aria-label="Add attendee from contacts"
+                        onChange={(e) => {
+                          addEditAttendeeEmail(e.target.value);
+                          e.target.value = "";
+                        }}
+                        style={{
+                          width: "100%",
+                          padding: "0.7rem",
+                          fontSize: "0.9rem",
+                          marginBottom: "0.5rem",
+                          border: "1px solid var(--border-color)",
+                          borderRadius: "8px",
+                          background: "var(--bg-color)",
+                          color: "var(--text-primary)",
+                          boxSizing: "border-box",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <option value="">+ Add from contacts…</option>
+                        {contactOptions.map((contact) => (
+                          <option key={contact.email} value={contact.email}>
+                            {contact.name} ({contact.email})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {editFormData.attendees && (
+                      <div
+                        aria-label="Selected attendees"
+                        style={{
+                          display: "flex",
+                          flexWrap: "wrap",
+                          gap: "0.45rem",
+                          marginBottom: "0.5rem",
+                          padding: "0.65rem",
+                          border: "1px solid var(--border-color)",
+                          borderRadius: "8px",
+                          background: "var(--bg-color)",
+                        }}
+                      >
+                        {editFormData.attendees
+                          .split(",")
+                          .map((email) => email.trim())
+                          .filter(Boolean)
+                          .map((email) => (
+                            <span
+                              key={email.toLowerCase()}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "0.35rem",
+                                maxWidth: "100%",
+                                padding: "0.35rem 0.55rem",
+                                borderRadius: "999px",
+                                background: "rgba(99,102,241,0.12)",
+                                color: "var(--text-primary)",
+                                fontSize: "0.82rem",
+                              }}
+                            >
+                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {email}
+                              </span>
+                              <button
+                                type="button"
+                                aria-label={`Remove ${email}`}
+                                title={`Remove ${email}`}
+                                onClick={() => removeEditAttendeeEmail(email)}
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  padding: 0,
+                                  border: 0,
+                                  background: "transparent",
+                                  color: "inherit",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                <X size={14} />
+                              </button>
+                            </span>
+                          ))}
+                      </div>
+                    )}
                     <input
                       type="text"
                       value={editFormData.attendees}
@@ -4183,6 +4377,64 @@ export default function CalendarSync() {
                       </option>
                     ))}
                   </select>
+                )}
+                {formData.attendees && (
+                  <div
+                    aria-label="Selected attendees"
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: "0.45rem",
+                      marginBottom: "0.5rem",
+                      padding: "0.65rem",
+                      border: "1px solid var(--border-color)",
+                      borderRadius: "8px",
+                      background: "var(--bg-color)",
+                    }}
+                  >
+                    {formData.attendees
+                      .split(",")
+                      .map((email) => email.trim())
+                      .filter(Boolean)
+                      .map((email) => (
+                        <span
+                          key={email.toLowerCase()}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "0.35rem",
+                            maxWidth: "100%",
+                            padding: "0.35rem 0.55rem",
+                            borderRadius: "999px",
+                            background: "rgba(99,102,241,0.12)",
+                            color: "var(--text-primary)",
+                            fontSize: "0.82rem",
+                          }}
+                        >
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {email}
+                          </span>
+                          <button
+                            type="button"
+                            aria-label={`Remove ${email}`}
+                            title={`Remove ${email}`}
+                            onClick={() => removeAttendeeEmail(email)}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              padding: 0,
+                              border: 0,
+                              background: "transparent",
+                              color: "inherit",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <X size={14} />
+                          </button>
+                        </span>
+                      ))}
+                  </div>
                 )}
                 <input
                   type="text"

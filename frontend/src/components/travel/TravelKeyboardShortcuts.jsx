@@ -219,7 +219,9 @@ export default function TravelKeyboardShortcuts({ enabled: enabledOverride }) {
 
     const onKeyDown = (e) => {
       if (e.defaultPrevented) return;
-      const key = e.key.toLowerCase();
+      // Synthetic keyboard events (and a few browser/automation edge cases)
+      // may omit `key`; shortcuts should simply be ignored in that case.
+      const key = String(e.key || "").toLowerCase();
       const typing = isTypingTarget(e.target);
 
       if (e.key === "Escape") {

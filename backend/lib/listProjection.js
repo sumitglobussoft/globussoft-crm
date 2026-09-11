@@ -192,6 +192,7 @@ const PROJECTIONS = Object.freeze({
     id: true,
     subBrand: true,
     contactId: true,
+    tripId: true,       // associated TMC trip, when present
     invoiceNum: true,    // operator headline
     status: true,
     docType: true,       // TaxInvoice vs CreditNote etc. — filter UI
